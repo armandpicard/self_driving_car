@@ -1,0 +1,11 @@
+[package]
+name = "self_driving_car"
+version = "0.1.0"
+authors = ["armand <armandpicard71@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+sfml = "0.14.0"
+nalgebra = "0.17.0"
+image = "0.21.0"
+rand = "0.6.5"
