@@ -19,14 +19,14 @@ use std::{thread, time};
 
 fn get_event(window: &mut RenderWindow) -> bool{
     while let Some(event) = window.poll_event() {
-            match event {
-                Event::Closed | Event::KeyPressed {
-                    code: Key::Escape, ..
-                } => return true,
-                _ => {}
-            }
+        match event {
+            Event::Closed | Event::KeyPressed {
+                code: Key::Escape, ..
+            } => return true,
+            _ => {}
         }
-        return false;
+    }
+    return false;
 }
 
 fn render(window: &mut RenderWindow, map: &Map) {
@@ -109,16 +109,21 @@ fn get_best_of_gen(map: &Map, models: Vec<Model>) -> Model{
     }
 }
 
-fn get_n_best_of_gen(map: &Map, mut models: Vec<Model>, num: usize) -> Vec<Model>{
+fn get_n_best_of_gen(map: &Map, models: Vec<Model>, num: usize) -> Vec<(Model, usize)>{
     let mut cars: Vec<Car> = Vec::new();
     let mut n = 0;
-
+    let mut my_models: Vec<(Model, usize)> = Vec::new();
     for _ in models.iter() {
         cars.push(Car::new(500.0, 500., 0.0));
     }
+
+    for m in models {
+        my_models.push((m, 0));
+    }
+
     loop {
         for (i, a) in cars.iter_mut().enumerate() {
-            a.input(models.get(i).unwrap());
+            a.input(&my_models.get(i).unwrap().0);
             a.update(&map);
         }
         
@@ -128,29 +133,26 @@ fn get_n_best_of_gen(map: &Map, mut models: Vec<Model>, num: usize) -> Vec<Model
                 vie = true;
             }
         }
-        if !vie || n > 1000 {
-            while models.len() > num {
-                let mut worst = 0;
-                for (i, a) in cars.iter().enumerate() {
-                    if a.d <= cars.get(worst).unwrap().d {
-                        worst = i;
-                    }
-                }
-                cars.remove(worst);
-                models.remove(worst);
+        if !vie || n > 500 {
+            // while models.len() > num {
+            //     let mut worst = 0;
+            //     for (i, a) in cars.iter().enumerate() {
+            //         if a.d <= cars.get(worst).unwrap().d {
+            //             worst = i;
+            //         }
+            //     }
+            //     cars.remove(worst);
+            //     models.remove(worst);
+            // }
+            for (i, a) in cars.iter().enumerate() {
+                my_models[i].1 = a.d as usize;
             }
-            let mut best = 0.0;
-            let mut worst = 100000.;
-            for a in cars.iter() {
-                if a.d < worst {
-                    worst = a.d;
-                }
-                if a.d > best{
-                    best = a.d;
-                }
-            }
-            println!("tout est mort ou on a fini: n={}, worst={} ,best={}", n, worst, best);
-            return models;
+
+            my_models.sort_by(|a, b| b.1.cmp(&a.1));
+            my_models.truncate(num);
+    
+            //println!("tout est mort ou on a fini: n={}, worst={} ,best={}", n, worst, best);
+            return my_models;
         }
         n = n + 1;
     }
@@ -228,29 +230,36 @@ fn train_with_genetic(map: &Map, model: Model) -> Vec<Model> {
     let mut models: Vec<Model> = Vec::new();
 
     //initial population init random
-    for _ in 0..200 {
+    for _ in 0..500 {
         models.push(model.copy_mut(1.0, 3.0));
     }
     //get the 5 best of the first generation to create more like those
-    let mut bests = get_n_best_of_gen(&map, models, 5);
+    let mut bests = get_n_best_of_gen(&map, models, 8);
 
     //for each generation we get the 8 best and create more like those
-    for generation in 1..50 {
+    for generation in 1..20 {
         println!("start generation: {}", generation);
         let mut my_threads = Vec::new();
         let mut my_rx = Vec::new();
-        let mut level = map.level;
+        let level = map.level;
 
+        let chunk = bests.chunks(bests.len() / 8);
         for best in bests {
             let (tx, rx) = mpsc::channel();
             my_rx.push(rx);
             my_threads.push(thread::spawn(move || {
                 let my_map = Map::from_level(level);
                 let mut my_models = Vec::new();
-                my_models.push(best.clone());
+                my_models.push(best.0.clone());
                 //create 100 child model from one of the bests if the last generation
-                for _ in 0..100 {
-                    my_models.push(best.copy_mut(0.05, 0.01));
+                for _ in 0..500 {
+                    my_models.push(best.0.copy_mut(0.05, 0.01));
+                }
+                for _ in 0..500 {
+                    my_models.push(best.0.copy_mut(0.05, 0.5));
+                }
+                for _ in 0..500 {
+                    my_models.push(best.0.copy_mut(0.05, 0.5));
                 }
 
                 let bests_current = get_n_best_of_gen(&my_map, my_models, 2);
@@ -269,10 +278,14 @@ fn train_with_genetic(map: &Map, model: Model) -> Vec<Model> {
                 bests.push(a);
             }
         }
-        //get bests of
-        bests = get_n_best_of_gen(map, bests, 8);
+        bests.sort_by(|a, b| b.1.cmp(&a.1));
+        bests.truncate(8);
     };
-    return bests.clone();
+    let mut result = Vec::new();
+    for m in bests {
+        result.push(m.0);
+    }
+    return result;
 }
 
 fn main() {
